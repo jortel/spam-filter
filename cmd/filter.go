@@ -41,6 +41,7 @@ func filterSpam(client *imapclient.Client) {
 		account = m.Envelope.From[0].Mailbox
 		subject := m.Envelope.Subject
 		spamDomain := spam[domain]
+
 		if !spamDomain.match(account) {
 			continue
 		}
@@ -52,13 +53,14 @@ func filterSpam(client *imapclient.Client) {
 			subject,
 			spamDomain.string())
 
-		if promptContinue() {
-			moveSpam(client, m)
-		}
+		moveSpam(client, m)
 	}
 }
 
 func moveSpam(client *imapclient.Client, m *imapclient.FetchMessageBuffer) {
+	if !confirmMove() {
+		return
+	}
 	fmt.Printf(
 		"\nMoving: uid:%d\n",
 		m.UID)
@@ -74,15 +76,18 @@ func moveSpam(client *imapclient.Client, m *imapclient.FetchMessageBuffer) {
 		md.SourceUIDs.String())
 }
 
-func promptContinue() (cont bool) {
+func confirmMove() (confirmed bool) {
 	r := bufio.NewReader(os.Stdin)
 	fmt.Printf("MOVE:[y|n]: ")
 	ans, _ := r.ReadString('\n')
 	ans = strings.TrimSpace(ans)
-	if ans == "q" {
+	ans = strings.ToUpper(ans)
+	switch ans {
+	case "Q":
 		os.Exit(0)
+	case "Y", "":
+		confirmed = true
 	}
-	cont = ans == "y" || ans == ""
 	return
 }
 
