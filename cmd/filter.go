@@ -17,6 +17,9 @@ const (
 	SPAM  = "INBOX.spam"
 )
 
+// filterSpam spam is detected by matching the account and/or domain
+// to messages found in the INBOX.spam folder. Spam found in the
+// INBOX is moved to the INBOX.spam folder.
 func filterSpam(client *imapclient.Client) {
 	spam := make(map[string]Domain)
 	fetchSpam(client, spam)
