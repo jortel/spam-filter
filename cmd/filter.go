@@ -25,27 +25,7 @@ func filterSpam(client *imapclient.Client) {
 		fmt.Printf("  %s\n", domain.string())
 	}
 
-	selectCmd := client.Select(INBOX, nil)
-	box, err := selectCmd.Wait()
-	if err != nil {
-		panic(err)
-	}
-	begin := uint32(1)
-	end := box.NumMessages
-	seqSet := imap.SeqSet{}
-	seqSet.AddRange(begin, end)
-	options := &imap.FetchOptions{Envelope: true, Flags: true, UID: true}
-	fetchCmd := client.Fetch(seqSet, options)
-	mark := time.Now()
-	messages, err := fetchCmd.Collect()
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Printf(
-		"\nfetch[INBOX]: count: %d, duration: %s\n\n",
-		box.NumMessages,
-		time.Since(mark))
+	messages := fetchInbox(client)
 
 	slices.Reverse(messages)
 	for i := range messages {
@@ -73,9 +53,6 @@ func filterSpam(client *imapclient.Client) {
 		r := bufio.NewReader(os.Stdin)
 		fmt.Printf("MOVE:[y|n]: ")
 		ans, _ := r.ReadString('\n')
-		if err != nil {
-			panic(err)
-		}
 		ans = strings.TrimSpace(ans)
 		if ans == "q" {
 			return
@@ -87,7 +64,7 @@ func filterSpam(client *imapclient.Client) {
 		fmt.Printf(
 			"\nMoving: uid:%d\n",
 			m.UID)
-		seqSet = imap.SeqSet{}
+		seqSet := imap.SeqSet{}
 		seqSet.AddNum(m.SeqNum)
 		moveCmd := client.Move(seqSet, SPAM)
 		md, err := moveCmd.Wait()
@@ -98,6 +75,30 @@ func filterSpam(client *imapclient.Client) {
 			"\nMoved: uid:%s\n",
 			md.SourceUIDs.String())
 	}
+}
+
+func fetchInbox(client *imapclient.Client) (messages []*imapclient.FetchMessageBuffer) {
+	selectCmd := client.Select(INBOX, nil)
+	box, err := selectCmd.Wait()
+	if err != nil {
+		panic(err)
+	}
+	begin := uint32(1)
+	end := box.NumMessages
+	seqSet := imap.SeqSet{}
+	seqSet.AddRange(begin, end)
+	options := &imap.FetchOptions{Envelope: true, Flags: true, UID: true}
+	fetchCmd := client.Fetch(seqSet, options)
+	mark := time.Now()
+	messages, err = fetchCmd.Collect()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf(
+		"\nfetch[INBOX]: count: %d, duration: %s\n\n",
+		box.NumMessages,
+		time.Since(mark))
+	return
 }
 
 func fetchSpam(client *imapclient.Client, domains map[string]Domain) {
