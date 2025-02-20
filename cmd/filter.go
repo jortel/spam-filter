@@ -27,7 +27,6 @@ func filterSpam(client *imapclient.Client) {
 
 	messages := fetchInbox(client)
 
-	slices.Reverse(messages)
 	for i := range messages {
 		m := messages[i]
 		domain := "NONE"
@@ -50,31 +49,38 @@ func filterSpam(client *imapclient.Client) {
 			subject,
 			spamDomain.string())
 
-		r := bufio.NewReader(os.Stdin)
-		fmt.Printf("MOVE:[y|n]: ")
-		ans, _ := r.ReadString('\n')
-		ans = strings.TrimSpace(ans)
-		if ans == "q" {
-			return
+		if promptContinue() {
+			moveSpam(client, m)
 		}
-		if ans != "y" && ans != "" {
-			continue
-		}
-
-		fmt.Printf(
-			"\nMoving: uid:%d\n",
-			m.UID)
-		seqSet := imap.SeqSet{}
-		seqSet.AddNum(m.SeqNum)
-		moveCmd := client.Move(seqSet, SPAM)
-		md, err := moveCmd.Wait()
-		if err != nil {
-			panic(err)
-		}
-		fmt.Printf(
-			"\nMoved: uid:%s\n",
-			md.SourceUIDs.String())
 	}
+}
+
+func moveSpam(client *imapclient.Client, m *imapclient.FetchMessageBuffer) {
+	fmt.Printf(
+		"\nMoving: uid:%d\n",
+		m.UID)
+	seqSet := imap.SeqSet{}
+	seqSet.AddNum(m.SeqNum)
+	moveCmd := client.Move(seqSet, SPAM)
+	md, err := moveCmd.Wait()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf(
+		"\nMoved: uid:%s\n",
+		md.SourceUIDs.String())
+}
+
+func promptContinue() (cont bool) {
+	r := bufio.NewReader(os.Stdin)
+	fmt.Printf("MOVE:[y|n]: ")
+	ans, _ := r.ReadString('\n')
+	ans = strings.TrimSpace(ans)
+	if ans == "q" {
+		os.Exit(0)
+	}
+	cont = ans == "y" || ans == ""
+	return
 }
 
 func fetchInbox(client *imapclient.Client) (messages []*imapclient.FetchMessageBuffer) {
@@ -94,6 +100,7 @@ func fetchInbox(client *imapclient.Client) (messages []*imapclient.FetchMessageB
 	if err != nil {
 		panic(err)
 	}
+	slices.Reverse(messages)
 	fmt.Printf(
 		"\nfetch[INBOX]: count: %d, duration: %s\n\n",
 		box.NumMessages,
