@@ -23,6 +23,7 @@ const (
 type Filter struct {
 	promptUser bool
 	//
+	counts    map[string]uint32
 	domains   map[string]Domain
 	eventChan chan Event
 }
@@ -31,8 +32,9 @@ type Filter struct {
 // to messages found in the INBOX.spam folder. Spam found in the
 // INBOX is moved to the INBOX.spam folder.
 func (r *Filter) Run() {
+	r.counts = make(map[string]uint32)
 	r.domains = make(map[string]Domain)
-	r.eventChan = make(chan Event, 100)
+	r.eventChan = make(chan Event, 4096)
 	r.watch(SPAM)
 	r.watch(INBOX)
 	r.fetchSpam()
@@ -65,7 +67,11 @@ func (r *Filter) openWith(mailbox string, options *imapclient.Options) (client *
 }
 
 func (r *Filter) filterInbox() {
-	messages := r.fetchInbox()
+	r.filterInboxAt(1)
+}
+
+func (r *Filter) filterInboxAt(begin uint32) {
+	messages := r.fetchInboxAt(begin)
 	if len(messages) == 0 {
 		return
 	}
@@ -100,16 +106,18 @@ func (r *Filter) filterInbox() {
 }
 
 func (r *Filter) fetchSpam() {
-	client := r.open(SPAM)
+	mailbox := SPAM
+	client := r.open(mailbox)
 	defer func() {
 		_ = client.Close()
 	}()
 	r.domains = make(map[string]Domain)
-	selectCmd := client.Select(SPAM, nil)
+	selectCmd := client.Select(mailbox, nil)
 	box, err := selectCmd.Wait()
 	if err != nil {
 		panic(err)
 	}
+	r.counts[mailbox] = box.NumMessages
 	begin := uint32(1)
 	end := box.NumMessages
 	seqSet := imap.SeqSet{}
@@ -146,16 +154,25 @@ func (r *Filter) fetchSpam() {
 }
 
 func (r *Filter) fetchInbox() (messages []*imapclient.FetchMessageBuffer) {
-	client := r.open(INBOX)
+	messages = r.fetchInboxAt(1)
+	return
+}
+
+func (r *Filter) fetchInboxAt(begin uint32) (messages []*imapclient.FetchMessageBuffer) {
+	mailbox := INBOX
+	client := r.open(mailbox)
 	defer func() {
 		_ = client.Close()
 	}()
-	selectCmd := client.Select(INBOX, nil)
+	selectCmd := client.Select(mailbox, nil)
 	box, err := selectCmd.Wait()
 	if err != nil {
 		panic(err)
 	}
-	begin := uint32(1)
+	r.counts[mailbox] = box.NumMessages
+	if begin < 1 {
+		return
+	}
 	end := box.NumMessages
 	seqSet := imap.SeqSet{}
 	seqSet.AddRange(begin, end)
@@ -171,8 +188,11 @@ func (r *Filter) fetchInbox() (messages []*imapclient.FetchMessageBuffer) {
 		"\nfetch[INBOX]: count: %d, duration: %s\n\n",
 		box.NumMessages,
 		time.Since(mark))
-
 	return
+}
+
+func (r *Filter) updateInbox() {
+	r.fetchInboxAt(0)
 }
 
 func (r *Filter) spamDetected(client *imapclient.Client, m *imapclient.FetchMessageBuffer) {
@@ -217,7 +237,7 @@ func (r *Filter) watch(mailbox string) (cmd *imapclient.IdleCommand) {
 			},
 			Mailbox: func(data *imapclient.UnilateralDataMailbox) {
 				if data.NumMessages != nil {
-					r.added(mailbox)
+					r.added(mailbox, *data.NumMessages)
 				}
 			},
 		},
@@ -240,10 +260,11 @@ func (r *Filter) expunged(mailbox string) {
 	fmt.Printf("> %s\n", event.string())
 }
 
-func (r *Filter) added(mailbox string) {
+func (r *Filter) added(mailbox string, count uint32) {
 	event := Event{
 		mailbox: mailbox,
 		action:  Added,
+		count:   count,
 	}
 	r.eventChan <- event
 	fmt.Printf("> %s\n", event.string())
@@ -258,7 +279,9 @@ func (r *Filter) processEvents() {
 		case INBOX:
 			switch event.action {
 			case Added:
-				r.filterInbox()
+				r.filterInboxAt(event.count)
+			case Expunged:
+				r.updateInbox()
 			}
 		}
 	}
@@ -298,6 +321,7 @@ func (d *Domain) string() (s string) {
 type Event struct {
 	mailbox string
 	action  string
+	count   uint32
 }
 
 func (r *Event) string() (s string) {
