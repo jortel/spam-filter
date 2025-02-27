@@ -159,7 +159,7 @@ func (r *Filter) printDomains() {
 		keyList = append(keyList, k)
 	}
 	sort.Strings(keyList)
-	fmt.Println("SPAM CATALOG:")
+	fmt.Printf("SPAM Domains(%d):\n", len(keyList))
 	for _, k := range keyList {
 		d := r.domains[k]
 		fmt.Printf("  %s\n", d.string())
