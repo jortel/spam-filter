@@ -74,6 +74,9 @@ func main() {
 		panic(err)
 	}
 
-	filter := Filter{client: client}
+	filter := Filter{
+		client:     client,
+		promptUser: true,
+	}
 	filter.Run()
 }
