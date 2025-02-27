@@ -17,18 +17,24 @@ const (
 	SPAM  = "INBOX.spam"
 )
 
-// filterSpam spam is detected by matching the account and/or domain
+type Filter struct {
+	client     *imapclient.Client
+	domains    map[string]Domain
+	promptUser bool
+}
+
+// Run spam is detected by matching the account and/or domain
 // to messages found in the INBOX.spam folder. Spam found in the
 // INBOX is moved to the INBOX.spam folder.
-func filterSpam(client *imapclient.Client) {
-	spam := make(map[string]Domain)
-	fetchSpam(client, spam)
+func (r *Filter) Run() {
+	r.domains = make(map[string]Domain)
+	r.fetchSpam()
 	fmt.Println("SPAM CATALOG:")
-	for _, domain := range spam {
+	for _, domain := range r.domains {
 		fmt.Printf("  %s\n", domain.string())
 	}
 
-	messages := fetchInbox(client)
+	messages := r.fetchInbox()
 
 	for i := range messages {
 		m := messages[i]
@@ -40,7 +46,7 @@ func filterSpam(client *imapclient.Client) {
 		domain = m.Envelope.Sender[0].Host
 		account = m.Envelope.From[0].Mailbox
 		subject := m.Envelope.Subject
-		spamDomain := spam[domain]
+		spamDomain := r.domains[domain]
 
 		if !spamDomain.match(account) {
 			continue
@@ -53,12 +59,12 @@ func filterSpam(client *imapclient.Client) {
 			subject,
 			spamDomain.string())
 
-		moveSpam(client, m)
+		r.spamDetected(m)
 	}
 }
 
-func moveSpam(client *imapclient.Client, m *imapclient.FetchMessageBuffer) {
-	if !confirmMove() {
+func (r *Filter) spamDetected(m *imapclient.FetchMessageBuffer) {
+	if !r.confirm() {
 		return
 	}
 	fmt.Printf(
@@ -66,7 +72,7 @@ func moveSpam(client *imapclient.Client, m *imapclient.FetchMessageBuffer) {
 		m.UID)
 	seqSet := imap.SeqSet{}
 	seqSet.AddNum(m.SeqNum)
-	moveCmd := client.Move(seqSet, SPAM)
+	moveCmd := r.client.Move(seqSet, SPAM)
 	md, err := moveCmd.Wait()
 	if err != nil {
 		panic(err)
@@ -76,10 +82,14 @@ func moveSpam(client *imapclient.Client, m *imapclient.FetchMessageBuffer) {
 		md.SourceUIDs.String())
 }
 
-func confirmMove() (confirmed bool) {
-	r := bufio.NewReader(os.Stdin)
+func (r *Filter) confirm() (confirmed bool) {
+	if !r.promptUser {
+		confirmed = true
+		return
+	}
+	reader := bufio.NewReader(os.Stdin)
 	fmt.Printf("MOVE:[y|n]: ")
-	ans, _ := r.ReadString('\n')
+	ans, _ := reader.ReadString('\n')
 	ans = strings.TrimSpace(ans)
 	ans = strings.ToUpper(ans)
 	switch ans {
@@ -91,8 +101,8 @@ func confirmMove() (confirmed bool) {
 	return
 }
 
-func fetchInbox(client *imapclient.Client) (messages []*imapclient.FetchMessageBuffer) {
-	selectCmd := client.Select(INBOX, nil)
+func (r *Filter) fetchInbox() (messages []*imapclient.FetchMessageBuffer) {
+	selectCmd := r.client.Select(INBOX, nil)
 	box, err := selectCmd.Wait()
 	if err != nil {
 		panic(err)
@@ -102,7 +112,7 @@ func fetchInbox(client *imapclient.Client) (messages []*imapclient.FetchMessageB
 	seqSet := imap.SeqSet{}
 	seqSet.AddRange(begin, end)
 	options := &imap.FetchOptions{Envelope: true, Flags: true, UID: true}
-	fetchCmd := client.Fetch(seqSet, options)
+	fetchCmd := r.client.Fetch(seqSet, options)
 	mark := time.Now()
 	messages, err = fetchCmd.Collect()
 	if err != nil {
@@ -116,8 +126,8 @@ func fetchInbox(client *imapclient.Client) (messages []*imapclient.FetchMessageB
 	return
 }
 
-func fetchSpam(client *imapclient.Client, domains map[string]Domain) {
-	selectCmd := client.Select(SPAM, nil)
+func (r *Filter) fetchSpam() {
+	selectCmd := r.client.Select(SPAM, nil)
 	box, err := selectCmd.Wait()
 	if err != nil {
 		panic(err)
@@ -127,7 +137,7 @@ func fetchSpam(client *imapclient.Client, domains map[string]Domain) {
 	seqSet := imap.SeqSet{}
 	seqSet.AddRange(begin, end)
 	options := &imap.FetchOptions{Envelope: true, Flags: true}
-	fetchCmd := client.Fetch(seqSet, options)
+	fetchCmd := r.client.Fetch(seqSet, options)
 	mark := time.Now()
 	messages, err := fetchCmd.Collect()
 	if err != nil {
@@ -150,11 +160,14 @@ func fetchSpam(client *imapclient.Client, domains map[string]Domain) {
 		if inWhiteList(host) {
 			continue
 		}
-		spam := domains[host]
+		spam := r.domains[host]
 		spam.name = host
 		spam.add(account)
-		domains[host] = spam
+		r.domains[host] = spam
 	}
+}
+
+func (r *Filter) watch() {
 }
 
 type Domain struct {

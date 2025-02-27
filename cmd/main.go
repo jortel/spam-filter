@@ -74,5 +74,6 @@ func main() {
 		panic(err)
 	}
 
-	filterSpam(client)
+	filter := Filter{client: client}
+	filter.Run()
 }
