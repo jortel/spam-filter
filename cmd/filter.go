@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -133,7 +134,6 @@ func (r *Filter) fetchSpam() {
 		"\nfetch[SPAM]: count: %d, duration: %s\n\n",
 		box.NumMessages,
 		time.Since(mark))
-	fmt.Println("SPAM CATALOG:")
 	for i := range messages {
 		m := messages[i]
 		host := "NONE"
@@ -149,7 +149,20 @@ func (r *Filter) fetchSpam() {
 		spam.name = host
 		spam.add(account)
 		r.domains[host] = spam
-		fmt.Printf("  %s\n", spam.string())
+	}
+	r.printDomains()
+}
+
+func (r *Filter) printDomains() {
+	keyList := []string{}
+	for k := range r.domains {
+		keyList = append(keyList, k)
+	}
+	sort.Strings(keyList)
+	fmt.Println("SPAM CATALOG:")
+	for _, k := range keyList {
+		d := r.domains[k]
+		fmt.Printf("  %s\n", d.string())
 	}
 }
 
@@ -279,7 +292,8 @@ func (r *Filter) processEvents() {
 		case INBOX:
 			switch event.action {
 			case Added:
-				r.filterInboxAt(event.count)
+				begin := event.begin(r.counts)
+				r.filterInboxAt(begin)
 			case Expunged:
 				r.updateInbox()
 			}
@@ -322,6 +336,15 @@ type Event struct {
 	mailbox string
 	action  string
 	count   uint32
+}
+
+func (r *Event) begin(counts map[string]uint32) (begin uint32) {
+	begin = r.count
+	n := counts[r.mailbox]
+	if begin > n {
+		begin = n
+	}
+	return
 }
 
 func (r *Event) string() (s string) {

@@ -74,6 +74,6 @@ func main() {
 		panic(err)
 	}
 
-	filter := Filter{promptUser: true}
+	filter := Filter{}
 	filter.Run()
 }
