@@ -95,7 +95,6 @@ func (r *Filter) filterInbox() {
 		account = m.Envelope.From[0].Mailbox
 		subject := m.Envelope.Subject
 		spamDomain := r.domains[domain]
-
 		if !spamDomain.match(account) {
 			continue
 		}
@@ -105,7 +104,6 @@ func (r *Filter) filterInbox() {
 			domain,
 			subject,
 			spamDomain.string())
-
 		r.spamDetected(client, m)
 	}
 }
