@@ -21,10 +21,12 @@ const (
 	Expunged = "Expunged"
 )
 
+// Filter spam emails found in the INBOX using domains
+// and accounts found in INBOX.spm.
 type Filter struct {
-	promptUser bool
+	askUser bool
 	//
-	counts    map[string]uint32
+	mailboxes map[string]uint32
 	domains   map[string]Domain
 	eventChan chan Event
 }
@@ -33,7 +35,7 @@ type Filter struct {
 // to messages found in the INBOX.spam folder. Spam found in the
 // INBOX is moved to the INBOX.spam folder.
 func (r *Filter) Run() {
-	r.counts = make(map[string]uint32)
+	r.mailboxes = make(map[string]uint32)
 	r.domains = make(map[string]Domain)
 	r.eventChan = make(chan Event, 4096)
 	r.watch(SPAM)
@@ -127,7 +129,7 @@ func (r *Filter) fetchSpam() {
 	if err != nil {
 		panic(err)
 	}
-	r.counts[mailbox] = box.NumMessages
+	r.mailboxes[mailbox] = box.NumMessages
 	begin := uint32(1)
 	end := box.NumMessages
 	seqSet := imap.SeqSet{}
@@ -194,7 +196,7 @@ func (r *Filter) fetchInboxAt(begin uint32) (messages []*imapclient.FetchMessage
 	if err != nil {
 		panic(err)
 	}
-	r.counts[mailbox] = box.NumMessages
+	r.mailboxes[mailbox] = box.NumMessages
 	if begin < 1 {
 		return
 	}
@@ -224,7 +226,7 @@ func (r *Filter) updateInbox() {
 // spamDetected handles a message identified as spam.
 // The message is moved to the `Filter` folder.
 func (r *Filter) spamDetected(client *imapclient.Client, m *imapclient.FetchMessageBuffer) {
-	if !r.askUser() {
+	if !r.promptUser() {
 		return
 	}
 	fmt.Printf("\nMoving: uid:%d\n", m.UID)
@@ -238,9 +240,9 @@ func (r *Filter) spamDetected(client *imapclient.Client, m *imapclient.FetchMess
 	fmt.Printf("\nMoved: uid:%s\n", md.SourceUIDs.String())
 }
 
-// askUser prompts the user to confirm handling of the spam.
-func (r *Filter) askUser() (confirmed bool) {
-	if !r.promptUser {
+// promptUser prompts the user to confirm handling of the spam.
+func (r *Filter) promptUser() (confirmed bool) {
+	if !r.askUser {
 		confirmed = true
 		return
 	}
@@ -313,7 +315,7 @@ func (r *Filter) processEvents() {
 		case INBOX:
 			switch event.action {
 			case Added:
-				begin := event.begin(r.counts)
+				begin := event.begin(r.mailboxes)
 				r.filterInboxAt(begin)
 			case Expunged:
 				r.updateInbox()
