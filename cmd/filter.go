@@ -3,9 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"math"
 	"os"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -39,7 +37,6 @@ func (r *Filter) Run() {
 	r.domains = make(map[string]Domain)
 	r.eventChan = make(chan Event, 4096)
 	r.filtered = imap.UIDSet{}
-	r.filtered.AddNum(math.MaxUint32)
 	r.watch(SPAM)
 	r.watch(INBOX)
 	r.fetchSpam()
@@ -171,38 +168,45 @@ func (r *Filter) printDomains() {
 
 // fetchInbox fetches the INBOX and returns a list of unseen messages.
 func (r *Filter) fetchInbox() (messages []*imapclient.FetchMessageBuffer) {
+	var err error
 	mailbox := INBOX
 	client, count := r.open(mailbox)
 	defer func() {
 		_ = client.Close()
 	}()
 	mark := time.Now()
-	searchQ := &imap.SearchCriteria{
-		Not: []imap.SearchCriteria{
-			{
-				UID: []imap.UIDSet{r.filtered},
+	var numSet imap.NumSet
+	if len(r.filtered) > 0 {
+		searchQ := &imap.SearchCriteria{
+			Not: []imap.SearchCriteria{
+				{
+					UID: []imap.UIDSet{r.filtered},
+				},
 			},
-		},
-	}
-	searchOpt := &imap.SearchOptions{
-		ReturnAll: true,
-	}
-	searchCmd := client.UIDSearch(searchQ, searchOpt)
-	matched, err := searchCmd.Wait()
-	if err != nil {
-		panic(err)
-	}
-	uidSet := matched.All
-	if uidSet == nil {
-		return
+		}
+		searchOpt := &imap.SearchOptions{
+			ReturnAll: true,
+		}
+		searchCmd := client.UIDSearch(searchQ, searchOpt)
+		matched, err := searchCmd.Wait()
+		if err != nil {
+			panic(err)
+		}
+		numSet = matched.All
+		if numSet == nil {
+			return
+		}
+	} else {
+		seqSet := imap.SeqSet{}
+		seqSet.AddRange(1, count)
+		numSet = seqSet
 	}
 	fetchOpt := &imap.FetchOptions{Envelope: true, Flags: true, UID: true}
-	fetchCmd := client.Fetch(matched.All, fetchOpt)
+	fetchCmd := client.Fetch(numSet, fetchOpt)
 	messages, err = fetchCmd.Collect()
 	if err != nil {
 		panic(err)
 	}
-	slices.Reverse(messages)
 	fmt.Printf(
 		"\nfetch[INBOX]: count: %d, matched: %d, duration: %s\n\n",
 		count,
