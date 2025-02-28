@@ -65,13 +65,7 @@ func (r *Filter) openWith(mailbox string, options *imapclient.Options) (client *
 	if err != nil {
 		panic(err)
 	}
-	count = r.selectBox(client, mailbox)
-	return
-}
-
-// selectBox selects the mailbox and returns the message count.
-func (r *Filter) selectBox(client *imapclient.Client, name string) (count uint32) {
-	selectCmd := client.Select(name, nil)
+	selectCmd := client.Select(mailbox, nil)
 	mb, err := selectCmd.Wait()
 	if err != nil {
 		panic(err)
