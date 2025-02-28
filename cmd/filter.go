@@ -43,11 +43,13 @@ func (r *Filter) Run() {
 	r.processEvents()
 }
 
+// open returns a client with the specified mailbox selected.
 func (r *Filter) open(mailbox string) (client *imapclient.Client) {
 	client = r.openWith(mailbox, nil)
 	return
 }
 
+// open returns a client with the specified options and mailbox selected.
 func (r *Filter) openWith(mailbox string, options *imapclient.Options) (client *imapclient.Client) {
 	var err error
 	client, err = imapclient.DialTLS(Host, options)
@@ -67,10 +69,16 @@ func (r *Filter) openWith(mailbox string, options *imapclient.Options) (client *
 	return
 }
 
+// filterInbox fetches the INBOX, identifies spam and moves
+// them to the Filtered folder.
+// Spam is identified using the domains-catalog.
 func (r *Filter) filterInbox() {
 	r.filterInboxAt(1)
 }
 
+// filterInbox fetches inbox beginning at seqNum, identifies
+// spam and moves them to the Filtered folder.
+// Spam is identified using the domains (catalog).
 func (r *Filter) filterInboxAt(begin uint32) {
 	messages := r.fetchInboxAt(begin)
 	if len(messages) == 0 {
@@ -106,6 +114,7 @@ func (r *Filter) filterInboxAt(begin uint32) {
 	}
 }
 
+// fetchSpam fetches the INBOX.spam mailbox and build the spam-catalog.
 func (r *Filter) fetchSpam() {
 	mailbox := SPAM
 	client := r.open(mailbox)
@@ -153,6 +162,7 @@ func (r *Filter) fetchSpam() {
 	r.printDomains()
 }
 
+// printDomains prints the spam-catalog.
 func (r *Filter) printDomains() {
 	keyList := []string{}
 	for k := range r.domains {
@@ -166,11 +176,13 @@ func (r *Filter) printDomains() {
 	}
 }
 
+// fetchInbox fetches the INBOX and returns a list of messages.
 func (r *Filter) fetchInbox() (messages []*imapclient.FetchMessageBuffer) {
 	messages = r.fetchInboxAt(1)
 	return
 }
 
+// fetchInbox fetches the INBOX beginning with seqNum and returns a list of messages.
 func (r *Filter) fetchInboxAt(begin uint32) (messages []*imapclient.FetchMessageBuffer) {
 	mailbox := INBOX
 	client := r.open(mailbox)
@@ -204,12 +216,15 @@ func (r *Filter) fetchInboxAt(begin uint32) (messages []*imapclient.FetchMessage
 	return
 }
 
+// updateInbox fetches the mailbox and updates the cached count.
 func (r *Filter) updateInbox() {
 	r.fetchInboxAt(0)
 }
 
+// spamDetected handles a message identified as spam.
+// The message is moved to the `Filter` folder.
 func (r *Filter) spamDetected(client *imapclient.Client, m *imapclient.FetchMessageBuffer) {
-	if !r.confirm() {
+	if !r.askUser() {
 		return
 	}
 	fmt.Printf("\nMoving: uid:%d\n", m.UID)
@@ -223,7 +238,8 @@ func (r *Filter) spamDetected(client *imapclient.Client, m *imapclient.FetchMess
 	fmt.Printf("\nMoved: uid:%s\n", md.SourceUIDs.String())
 }
 
-func (r *Filter) confirm() (confirmed bool) {
+// askUser prompts the user to confirm handling of the spam.
+func (r *Filter) askUser() (confirmed bool) {
 	if !r.promptUser {
 		confirmed = true
 		return
@@ -242,6 +258,8 @@ func (r *Filter) confirm() (confirmed bool) {
 	return
 }
 
+// watch opens IDLE connections to mailboxes.
+// Message events are queued in the eventChan.
 func (r *Filter) watch(mailbox string) (cmd *imapclient.IdleCommand) {
 	options := &imapclient.Options{
 		UnilateralDataHandler: &imapclient.UnilateralDataHandler{
@@ -264,6 +282,7 @@ func (r *Filter) watch(mailbox string) (cmd *imapclient.IdleCommand) {
 	return
 }
 
+// expunged enqueues message expunged events.
 func (r *Filter) expunged(mailbox string) {
 	event := Event{
 		mailbox: mailbox,
@@ -273,6 +292,7 @@ func (r *Filter) expunged(mailbox string) {
 	fmt.Printf("> %s\n", event.string())
 }
 
+// added enqueues message added events.
 func (r *Filter) added(mailbox string, count uint32) {
 	event := Event{
 		mailbox: mailbox,
@@ -283,6 +303,7 @@ func (r *Filter) added(mailbox string, count uint32) {
 	fmt.Printf("> %s\n", event.string())
 }
 
+// processEvents applies queued message events.
 func (r *Filter) processEvents() {
 	for event := range r.eventChan {
 		fmt.Printf("< %s\n", event.string())
@@ -301,12 +322,15 @@ func (r *Filter) processEvents() {
 	}
 }
 
+// Domain represents a domain identified as spam.
+// It contains a map of collated accounts in the domain.
 type Domain struct {
 	name    string
 	account map[string]int
 	count   int
 }
 
+// add an account to the domain.
 func (d *Domain) add(account string) {
 	d.count++
 	if d.account == nil {
@@ -315,6 +339,10 @@ func (d *Domain) add(account string) {
 	d.account[account] = d.account[account] + 1
 }
 
+// match returns true when the FROM account matches the domain.
+// Matches when:
+// - The domain contains multiple accounts.
+// - The domain contains the specified account.
 func (d *Domain) match(account string) (matched bool) {
 	switch d.count {
 	case 0:
@@ -327,17 +355,23 @@ func (d *Domain) match(account string) (matched bool) {
 	return
 }
 
+// sting returns a representation of the domain.
 func (d *Domain) string() (s string) {
 	s = fmt.Sprintf("(%s) nAccount: %d", d.name, len(d.account))
 	return
 }
 
+// Event is a mailbox event.
 type Event struct {
 	mailbox string
 	action  string
 	count   uint32
 }
 
+// begin returns seqNum of the last message in the mailbox at the
+// time this event was reported. Messages could have been expunged
+// since then so it is adjusted to ensure the seqNum is not beyond
+// the count.
 func (r *Event) begin(counts map[string]uint32) (begin uint32) {
 	begin = r.count
 	n := counts[r.mailbox]
@@ -347,6 +381,7 @@ func (r *Event) begin(counts map[string]uint32) (begin uint32) {
 	return
 }
 
+// string returns a string representation.
 func (r *Event) string() (s string) {
 	return fmt.Sprintf("Event: [%s] action: %s", r.mailbox, r.action)
 }
